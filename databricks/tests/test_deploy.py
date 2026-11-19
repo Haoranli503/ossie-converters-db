@@ -155,3 +155,38 @@ def test_model_scoped_metrics_and_relationships_are_reported():
     # revenue reads o_totalprice, which no view exposes, so it is dropped; order_count stays.
     deployed = yaml.safe_load(result.value["sales.ossie.yaml"])
     assert [m["name"] for m in deployed["metrics"]] == ["order_count"]
+
+
+@pytest.mark.parametrize(
+    ("sql", "kept"),
+    [
+        # Unquoted names match regardless of case, as Ossie regular identifiers do.
+        ("COUNT(ORDERS.O_ORDERKEY)", True),
+        ("COUNT(DISTINCT Orders.Status)", True),
+        # A quoted name matches exactly, so a different case is a different column.
+        ('COUNT("orders"."o_orderkey")', True),
+        ('COUNT("orders"."O_ORDERKEY")', False),
+        # A source column behind a field is not what the metric view exposes.
+        ("COUNT(DISTINCT orders.o_orderstatus)", False),
+    ],
+)
+def test_model_scoped_metric_exposed_column_matching(sql, kept):
+    model = {
+        "version": "0.3.0.dev0",
+        "name": "sales",
+        "datasets": [
+            {
+                "name": "orders",
+                "source": "samples.tpch.orders",
+                "fields": [
+                    {"name": "o_orderkey", "expression": {"sql": "o_orderkey"}},
+                    {"name": "status", "expression": {"sql": "o_orderstatus"}},
+                ],
+            }
+        ],
+        "metrics": [{"name": "m", "expression": {"sql": sql}}],
+    }
+    result = _deploy(model)
+    deployed = yaml.safe_load(result.value["sales.ossie.yaml"])
+    assert [m["name"] for m in deployed.get("metrics") or []] == (["m"] if kept else [])
+    assert [w.code for w in result.warnings] == [WarningCode.NOT_DEPLOYED]

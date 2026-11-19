@@ -100,7 +100,8 @@ Conversion and deployment serve different purposes:
   boundaries; filling portable expressions does not flatten joins into relationships.
 - `deploy` emits one metric view per dataset and rewrites the model to read those views.
   Relationships and model-scoped metrics remain in the Ossie model; they are not deployed
-  as metric-view joins or measures.
+  as metric-view joins or measures. A model-scoped metric that reads a column no metric
+  view exposes is dropped instead, and each of these is reported as `NOT_DEPLOYED`.
 - `wrap` exposes an existing metric view as one dataset. It does not import its joins as
   relationships between the underlying source tables.
 

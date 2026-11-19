@@ -133,7 +133,8 @@ def _unexposed_columns(metric: Mapping[str, Any], fields_by_dataset: dict[str, s
     """Columns a model-scoped metric reads that no deployed view exposes as a dimension.
 
     A dimension is exposed under `<dataset>.<field>`, so an unqualified or unknown column
-    cannot be shown to be exposed and counts as unexposed.
+    cannot be shown to be exposed and counts as unexposed. An unquoted name matches
+    regardless of case, as Ossie regular identifiers do; a quoted name matches exactly.
     """
     picked = metric_view.portable_text(metric.get("expression") or {})
     if picked is None:
@@ -143,11 +144,24 @@ def _unexposed_columns(metric: Mapping[str, Any], fields_by_dataset: dict[str, s
         tree = parse(text, dialect)
     except Untranslatable:
         return set()
-    return {
-        column.name
-        for column in columns(tree)
-        if not (column.table and column.name in fields_by_dataset.get(column.table, set()))
-    }
+    return {column.name for column in columns(tree) if not _is_exposed(column, fields_by_dataset)}
+
+
+def _is_exposed(column: exp.Column, fields_by_dataset: dict[str, set]) -> bool:
+    table = column.args.get("table")
+    if not isinstance(table, exp.Identifier):
+        return False
+    field = column.this
+    for dataset, fields in fields_by_dataset.items():
+        if _same_name(table, dataset):
+            return any(_same_name(field, name) for name in fields)
+    return False
+
+
+def _same_name(identifier: exp.Identifier, name: str) -> bool:
+    if identifier.quoted:
+        return identifier.name == name
+    return identifier.name.lower() == name.lower()
 
 
 def _reject_source_target_collisions(
