@@ -19,7 +19,7 @@ import pytest
 import yaml
 from conftest import assert_golden, fixture, warnings_of
 
-from ossie_databricks import ConversionError, deploy_ossie_model_to_databricks
+from ossie_databricks import ConversionError, WarningCode, deploy_ossie_model_to_databricks
 
 
 def _deploy(model, catalog="main"):
@@ -110,3 +110,48 @@ def test_multi_table_query_source_is_not_a_collision():
     }
     result = _deploy(model)
     assert "metric_views/joined.yaml" in result.value
+
+
+def test_model_scoped_metrics_and_relationships_are_reported():
+    model = {
+        "version": "0.3.0.dev0",
+        "name": "sales",
+        "datasets": [
+            {
+                "name": "orders",
+                "source": "samples.tpch.orders",
+                "fields": [
+                    {"name": "o_orderkey", "expression": {"sql": "o_orderkey"}},
+                    {"name": "o_custkey", "expression": {"sql": "o_custkey"}},
+                ],
+            },
+            {
+                "name": "customers",
+                "source": "samples.tpch.customer",
+                "fields": [{"name": "c_custkey", "expression": {"sql": "c_custkey"}}],
+            },
+        ],
+        "relationships": [
+            {
+                "name": "orders_to_customers",
+                "from": "orders",
+                "to": "customers",
+                "from_columns": ["o_custkey"],
+                "to_columns": ["c_custkey"],
+            }
+        ],
+        "metrics": [
+            {"name": "order_count", "expression": {"sql": "COUNT(orders.o_orderkey)"}},
+            {"name": "revenue", "expression": {"sql": "SUM(orders.o_totalprice)"}},
+        ],
+    }
+    result = _deploy(model)
+    codes = {w.code for w in result.warnings}
+    assert codes == {WarningCode.NOT_DEPLOYED}
+    messages = "\n".join(str(w) for w in result.warnings)
+    # The relationship and both model-scoped metrics are reported.
+    assert "relationships[orders_to_customers]" in messages
+    assert "metrics[order_count]" in messages and "metrics[revenue]" in messages
+    # revenue reads o_totalprice, which no view exposes, so it is dropped; order_count stays.
+    deployed = yaml.safe_load(result.value["sales.ossie.yaml"])
+    assert [m["name"] for m in deployed["metrics"]] == ["order_count"]

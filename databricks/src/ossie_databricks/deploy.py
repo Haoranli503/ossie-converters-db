@@ -76,11 +76,78 @@ def deploy_ossie_model_to_databricks(
             if metric["name"] in measures:
                 path = f"datasets[{name}].metrics[{metric['name']}]"
                 metric["expression"] = _deployed_metric(metric, dataset, path, result)
+    _report_not_deployed(model, deployed, result)
     _ossie.check(deployed, "the deployed model")
     files[f"{model['name']}.ossie.yaml"] = _ossie.dump(deployed)
 
     result.value = files
     return result
+
+
+def _report_not_deployed(
+    model: Mapping[str, Any], deployed: dict[str, Any], result: Result
+) -> None:
+    """Warn for what no metric view carries, and drop a metric that cannot evaluate.
+
+    Only a dataset's own fields and metrics become a metric view. A model-scoped metric is
+    never a measure and a relationship is never a join, so each is reported. A model-scoped
+    metric that reads a column no view exposes is also dropped, so the deployed model does
+    not keep a metric that can no longer evaluate. Joins are tracked in a separate issue.
+    """
+    fields_by_dataset = {
+        dataset["name"]: {field["name"] for field in dataset.get("fields") or []}
+        for dataset in model["datasets"]
+    }
+    kept = []
+    for metric in deployed.get("metrics") or []:
+        path = f"metrics[{metric['name']}]"
+        unexposed = _unexposed_columns(metric, fields_by_dataset)
+        if unexposed:
+            result.warn(
+                WarningCode.NOT_DEPLOYED,
+                path,
+                "a model-scoped metric reads columns no deployed metric view exposes "
+                f"({', '.join(sorted(unexposed))}); it is dropped from the deployed model",
+            )
+        else:
+            result.warn(
+                WarningCode.NOT_DEPLOYED,
+                path,
+                "a model-scoped metric is not a measure in any metric view",
+            )
+            kept.append(metric)
+    if "metrics" in deployed:
+        if kept:
+            deployed["metrics"] = kept
+        else:
+            del deployed["metrics"]
+    for relationship in deployed.get("relationships") or []:
+        result.warn(
+            WarningCode.NOT_DEPLOYED,
+            f"relationships[{relationship['name']}]",
+            "a relationship has no metric view form and is not deployed",
+        )
+
+
+def _unexposed_columns(metric: Mapping[str, Any], fields_by_dataset: dict[str, set]) -> set[str]:
+    """Columns a model-scoped metric reads that no deployed view exposes as a dimension.
+
+    A dimension is exposed under `<dataset>.<field>`, so an unqualified or unknown column
+    cannot be shown to be exposed and counts as unexposed.
+    """
+    picked = metric_view.portable_text(metric.get("expression") or {})
+    if picked is None:
+        return set()
+    text, dialect = picked
+    try:
+        tree = parse(text, dialect)
+    except Untranslatable:
+        return set()
+    return {
+        column.name
+        for column in columns(tree)
+        if not (column.table and column.name in fields_by_dataset.get(column.table, set()))
+    }
 
 
 def _reject_source_target_collisions(

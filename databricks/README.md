@@ -164,7 +164,10 @@ view when it is created.
 
 - The package does not connect to a workspace. It writes metric view definitions but does not
   create them.
-- Relationships have no metric view form. `deploy` keeps them in the Ossie model.
+- `deploy` builds each metric view from one dataset's fields and dataset-scoped metrics. A
+  model-scoped metric is not a measure and a relationship is not a join, so `deploy` reports
+  each with a `NOT_DEPLOYED` warning. A model-scoped metric that reads a column no view
+  exposes is also dropped from the rewritten model, since it could no longer evaluate.
 - A field or metric whose expressions are all in a non-SQL dialect has no dimension or measure.
   `deploy` reports it and keeps it unchanged in the model.
 - The package reads and writes metric view YAML version `1.1` only.

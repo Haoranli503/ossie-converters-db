@@ -142,12 +142,14 @@ files:
       to_columns:
       - customer_id
     metrics:
-    - name: revenue_per_customer
-      expression:
-        sql: AGG(orders.revenue) / COUNT(DISTINCT customers.customer_id)
     - name: average_amount
       expression:
         sql: AVG(orders.amount)
 warnings:
 - '[METRIC_NOT_PORTABLE] at datasets[orders].metrics[discount]: the portable expression reads source columns,
   which the metric view does not expose; the metric only evaluates the measure'
+- '[NOT_DEPLOYED] at metrics[revenue_per_customer]: a model-scoped metric reads columns no deployed metric
+  view exposes (revenue); it is dropped from the deployed model'
+- '[NOT_DEPLOYED] at metrics[average_amount]: a model-scoped metric is not a measure in any metric view'
+- '[NOT_DEPLOYED] at relationships[orders_to_customers]: a relationship has no metric view form and is
+  not deployed'
